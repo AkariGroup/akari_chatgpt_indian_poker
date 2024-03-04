@@ -1,0 +1,12 @@
+akari-client[depthai]
+akari-proto
+google-cloud-speech
+-e akari_chatgpt_bot/gpt-stream-json-parser/
+grpcio
+grpcio-tools
+openai
+numpy
+PyAudio
+python-dotenv
+six
+SpeechRecognition
