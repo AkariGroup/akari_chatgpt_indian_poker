@@ -43,7 +43,7 @@ class ChatStreamAkariPoker(ChatStreamAkari):
         self,
         messages: list,
         model: str = "gpt-4-turbo-preview",
-        temperature: float = 0.5,
+        temperature: float = 0.7,
     ) -> bool:
         result = openai.chat.completions.create(
             model=model,
@@ -53,13 +53,13 @@ class ChatStreamAkariPoker(ChatStreamAkari):
             functions=[
                 {
                     "name": "judge_card_change",
-                    "description": "今までのやり取りから、インディアン・ポーカーに勝つために自分のカードを変更するか判断する。",
+                    "description": "今までの会話から、インディアン・ポーカーに勝つために自分のカードを変更すべきか判断する。あかりの数値が弱いと思ったら積極的に変更する。",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "change": {
                                 "type": "boolean",
-                                "description": "カードを交換するか",
+                                "description": "カードを変更するか",
                             },
                         },
                         "required": ["change"],
@@ -226,6 +226,8 @@ def main() -> None:
         model_path=args.model,
         fps=args.fps,
     )
+    detection_thread = threading.Thread(target=card_detector.loop)
+    detection_thread.start()
     m5.set_display_text(
         "AKARI", Positions.CENTER, 30, 5, Colors.RED, Colors.WHITE, True
     )
@@ -264,8 +266,6 @@ def main() -> None:
     end = False
     while not end:
         card_detector.start_judging()
-        detection_thread = threading.Thread(target=card_detector.loop)
-        detection_thread.start()
         messages = [
             {
                 "role": "system",
@@ -295,7 +295,6 @@ def main() -> None:
             sync=False,
         )
         player_card_num = card_detector.get_card_result()
-        time.sleep(2)
         with MicrophoneStream(RATE, CHUNK, timeout, power_threshold) as stream:
             # 対話タイム
             m5.set_display_text(
@@ -346,13 +345,19 @@ def main() -> None:
                 "content": f"「{text}」これはあかりのカードの数値に対する相手の発言で、嘘かもしれません。敵のカードは{player_card_num}です。これは事実です。以上を元に、今度はあなたが敵のカードについて、敵を騙すか、たまに本当のことを伝えるコメントを簡潔にしてください。敵の数値は発言してはいけません。",
             }
         )
+        # うなずきリピート停止
+        try:
+            stub.StopRepeat(motion_server_pb2.StopRepeatRequest(priority=3))
+        except BaseException:
+            print("akari_motion_server is not working.")
         response = ""
         for sentence in chat_stream_akari_poker.chat(messages):
             text_to_voice.put_text(sentence)
             response += sentence
             print(sentence, end="")
         messages.append({"role": "assistant", "content": response})
-        time.sleep(7)
+        text_to_voice.wait_finish()
+        time.sleep(1)
 
         # カード交換タイム
         change = chat_stream_akari_poker.judge_card_change(messages)
@@ -368,7 +373,6 @@ def main() -> None:
             text_to_voice.put_text(
                 "カードを交換するよ。あなたも交換するなら、カウントダウン中にね。"
             )
-
             akari_card_num = random.randint(1, 13)
         else:
             try:
