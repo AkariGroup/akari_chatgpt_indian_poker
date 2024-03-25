@@ -21,6 +21,7 @@ from akari_chatgpt_bot.lib.google_speech import (
 )
 import cv2
 from lib.akari_yolo_lib.oakd_yolo import OakdYolo
+from lib.akari_yolo_lib.util import download_file
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "lib/grpc"))
 import motion_server_pb2
@@ -202,6 +203,10 @@ def main() -> None:
         type=int,
     )
     args = parser.parse_args()
+    model_path = "model/card.blob"
+    config_path = "config/card.json"
+    download_file(model_path, "https://github.com/AkariGroup/akari_yolo_models/raw/main/card/card.blob")
+    download_file(config_path, "https://github.com/AkariGroup/akari_yolo_models/raw/main/card/card.json")
     timeout: float = args.timeout
     power_threshold: float = args.power_threshold
     if power_threshold == 0:
@@ -222,8 +227,8 @@ def main() -> None:
     stub = motion_server_pb2_grpc.MotionServerServiceStub(channel)
     chat_stream_akari_poker = ChatStreamAkariPoker(args.robot_ip, args.robot_port)
     card_detector = CardDetector(
-        config_path=args.config,
-        model_path=args.model,
+        config_path=config_path,
+        model_path=model_path,
         fps=args.fps,
     )
     detection_thread = threading.Thread(target=card_detector.loop)
@@ -342,7 +347,7 @@ def main() -> None:
         messages.append(
             {
                 "role": "user",
-                "content": f"「{text}」これはあかりのカードの数値に対する相手の発言で、嘘かもしれません。敵のカードは{player_card_num}です。これは事実です。以上を元に、今度はあなたが敵のカードについて、敵を騙すか、たまに本当のことを伝えるコメントを簡潔にしてください。敵の数値は発言してはいけません。",
+                "content": f"「{text}」これはあかりのカードの数値に対する相手の発言で、嘘かもしれません。敵のカードは{player_card_num}です。これは事実です。以上を元に、今度はあなたが敵のカードについて、敵を騙すか、たまに本当のことを伝えるコメントを簡潔にしてください。敵の数値は発言してはいけません。コメントだけを返してください。",
             }
         )
         # うなずきリピート停止
@@ -351,12 +356,13 @@ def main() -> None:
         except BaseException:
             print("akari_motion_server is not working.")
         response = ""
-        for sentence in chat_stream_akari_poker.chat(messages):
+        for sentence in chat_stream_akari_poker.chat(messages,model="gpt-3.5-turbo-0613"):
             text_to_voice.put_text(sentence)
             response += sentence
-            print(sentence, end="")
+            print(sentence, end="", flush=True)
         messages.append({"role": "assistant", "content": response})
         text_to_voice.wait_finish()
+        print("")
         time.sleep(1)
 
         # カード交換タイム
@@ -456,10 +462,11 @@ def main() -> None:
                 sync=False,
             )
         response = ""
-        for sentence in chat_stream_akari_poker.chat(messages):
+        for sentence in chat_stream_akari_poker.chat(messages,model="gpt-3.5-turbo-0613"):
             text_to_voice.put_text(sentence)
             response += sentence
-            print(sentence, end="")
+            print(sentence, end="", flush=True)
+        print("")
         time.sleep(7)
 
         # 再プレイ判定
