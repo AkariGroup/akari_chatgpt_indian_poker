@@ -8,19 +8,19 @@ import threading
 import json
 import time
 import random
-from concurrent import futures
 from akari_client import AkariClient
 from akari_client.color import Colors
 from akari_client.position import Positions
 from akari_chatgpt_bot.lib.chat_akari import ChatStreamAkari
-from akari_chatgpt_bot.lib.conf import OPENAI_APIKEY
 from akari_chatgpt_bot.lib.google_speech import (
     MicrophoneStream,
     get_db_thresh,
     listen_print_loop,
 )
 import cv2
+from distutils.util import strtobool
 from lib.akari_yolo_lib.oakd_yolo import OakdYolo
+from lib.akari_yolo_lib.util import download_file
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "lib/grpc"))
 import motion_server_pb2
@@ -39,7 +39,7 @@ m5 = akari.m5stack
 
 
 class ChatStreamAkariPoker(ChatStreamAkari):
-    def judge_card_change(
+    def judge_card_change_gpt(
         self,
         messages: list,
         model: str = "gpt-4-turbo-preview",
@@ -73,6 +73,55 @@ class ChatStreamAkariPoker(ChatStreamAkari):
         message = result.choices[0].message
         arguments = json.loads(message.function_call.arguments)
         return bool(arguments["change"])
+
+    def judge_card_change_anthropic(
+        self,
+        messages: list,
+        model: str = "claude-3-sonnet-20240229",
+        temperature: float = 0.7,
+    ) -> bool:
+        system_message = ""
+        user_messages = []
+        for message in messages:
+            if message["role"] == "system":
+                system_message = message["content"]
+            else:
+                user_messages.append(message)
+        user_messages.append(
+            self.create_message(
+                text='今までの会話から、インディアン・ポーカーに勝つために自分のカードを変更すべきか判断してください。そのまま勝てそうなら変更しないで、負けそうなら変更してください。返答は下記のJSON形式で出力してください。{"change": "カードを変更するか。"true" or "false"で返す。"}'
+            )
+        )
+        # 最後の1文を動作と文章のJSON形式出力指定に修正
+        response = self.anthropic_client.messages.create(
+            model=model,
+            max_tokens=1000,
+            temperature=temperature,
+            messages=user_messages,
+            system=system_message,
+        )
+        print(response.content[0].text)
+        arguments = json.loads(response.content[0].text)
+        return strtobool(arguments["change"])
+
+    def judge_card_change(
+        self,
+        messages: list,
+        model: str = "gpt-4-turbo-preview",
+        temperature: float = 0.7,
+    ) -> bool:
+        res = False
+        if model in self.openai_model_name:
+            res = self.judge_card_change_gpt(
+                messages=messages, model=model, temperature=temperature
+            )
+        elif model in self.anthropic_model_name:
+            res = self.judge_card_change_anthropic(
+                messages=messages, model=model, temperature=temperature
+            )
+        else:
+            print(f"Model name {model} can't use for this function")
+        return res
 
 
 class CardDetector(OakdYolo):
@@ -202,6 +251,16 @@ def main() -> None:
         type=int,
     )
     args = parser.parse_args()
+    model_path = "model/card.blob"
+    config_path = "config/card.json"
+    download_file(
+        model_path,
+        "https://github.com/AkariGroup/akari_yolo_models/raw/main/card/card.blob",
+    )
+    download_file(
+        config_path,
+        "https://github.com/AkariGroup/akari_yolo_models/raw/main/card/card.json",
+    )
     timeout: float = args.timeout
     power_threshold: float = args.power_threshold
     if power_threshold == 0:
@@ -222,8 +281,8 @@ def main() -> None:
     stub = motion_server_pb2_grpc.MotionServerServiceStub(channel)
     chat_stream_akari_poker = ChatStreamAkariPoker(args.robot_ip, args.robot_port)
     card_detector = CardDetector(
-        config_path=args.config,
-        model_path=args.model,
+        config_path=config_path,
+        model_path=model_path,
         fps=args.fps,
     )
     detection_thread = threading.Thread(target=card_detector.loop)
@@ -342,7 +401,7 @@ def main() -> None:
         messages.append(
             {
                 "role": "user",
-                "content": f"「{text}」これはあかりのカードの数値に対する相手の発言で、嘘かもしれません。敵のカードは{player_card_num}です。これは事実です。以上を元に、今度はあなたが敵のカードについて、敵を騙すか、たまに本当のことを伝えるコメントを簡潔にしてください。敵の数値は発言してはいけません。",
+                "content": f"「{text}」これはあかりのカードの数値に対する相手の発言で、嘘かもしれません。敵のカードは{player_card_num}です。これは事実です。以上を元に、今度はあなたが敵のカードについて、敵を騙すか、たまに本当のことを伝えるコメントを簡潔にしてください。敵の数値は発言してはいけません。コメントだけを返してください。",
             }
         )
         # うなずきリピート停止
@@ -351,12 +410,15 @@ def main() -> None:
         except BaseException:
             print("akari_motion_server is not working.")
         response = ""
-        for sentence in chat_stream_akari_poker.chat(messages):
+        for sentence in chat_stream_akari_poker.chat(
+            messages, model="gpt-4-turbo-preview"
+        ):
             text_to_voice.put_text(sentence)
             response += sentence
-            print(sentence, end="")
+            print(sentence, end="", flush=True)
         messages.append({"role": "assistant", "content": response})
         text_to_voice.wait_finish()
+        print("")
         time.sleep(1)
 
         # カード交換タイム
@@ -420,7 +482,9 @@ def main() -> None:
         card_detector.start_judging()
         player_card_num = card_detector.get_card_result()
         if akari_card_num > player_card_num:
-            messages.append({"role": "user", "content": "あなたの勝ちです。"})
+            messages.append(
+                {"role": "user", "content": "勝負の結果あかりが勝ちました。"}
+            )
             m5.set_display_text(
                 text="あなたの負け",
                 pos_x=Positions.CENTER,
@@ -432,7 +496,9 @@ def main() -> None:
                 sync=False,
             )
         elif akari_card_num < player_card_num:
-            messages.append({"role": "user", "content": "あなたの負けです。"})
+            messages.append(
+                {"role": "user", "content": "勝負の結果あかりが負けました。"}
+            )
             m5.set_display_text(
                 text="あなたの勝ち",
                 pos_x=Positions.CENTER,
@@ -444,7 +510,7 @@ def main() -> None:
                 sync=False,
             )
         else:
-            messages.append({"role": "user", "content": "引き分けです。"})
+            messages.append({"role": "user", "content": "勝負の結果引き分けでした。"})
             m5.set_display_text(
                 text="引き分け",
                 pos_x=Positions.CENTER,
@@ -456,10 +522,13 @@ def main() -> None:
                 sync=False,
             )
         response = ""
-        for sentence in chat_stream_akari_poker.chat(messages):
+        for sentence in chat_stream_akari_poker.chat(
+            messages, model="gpt-3.5-turbo-0613"
+        ):
             text_to_voice.put_text(sentence)
             response += sentence
-            print(sentence, end="")
+            print(sentence, end="", flush=True)
+        print("")
         time.sleep(7)
 
         # 再プレイ判定
