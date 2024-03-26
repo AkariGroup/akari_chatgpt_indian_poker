@@ -18,6 +18,7 @@ from akari_chatgpt_bot.lib.google_speech import (
     listen_print_loop,
 )
 import cv2
+from distutils.util import strtobool
 from lib.akari_yolo_lib.oakd_yolo import OakdYolo
 from lib.akari_yolo_lib.util import download_file
 
@@ -88,7 +89,7 @@ class ChatStreamAkariPoker(ChatStreamAkari):
                 user_messages.append(message)
         user_messages.append(
             self.create_message(
-                text='今までの会話から、インディアン・ポーカーに勝つために自分のカードを変更すべきか判断してください。あかりの数値が弱いと思ったら積極的に変更してください。返答は下記のJSON形式で出力してください。{{"change": カードを変更するか。true or falseで返す。}}'
+                text='今までの会話から、インディアン・ポーカーに勝つために自分のカードを変更すべきか判断してください。そのまま勝てそうなら変更しないで、負けそうなら変更してください。返答は下記のJSON形式で出力してください。{"change": "カードを変更するか。"true" or "false"で返す。"}'
             )
         )
         # 最後の1文を動作と文章のJSON形式出力指定に修正
@@ -99,8 +100,9 @@ class ChatStreamAkariPoker(ChatStreamAkari):
             messages=user_messages,
             system=system_message,
         )
+        print(response.content[0].text)
         arguments = json.loads(response.content[0].text)
-        return bool(arguments["change"])
+        return strtobool(arguments["change"])
 
     def judge_card_change(
         self,
@@ -409,7 +411,7 @@ def main() -> None:
             print("akari_motion_server is not working.")
         response = ""
         for sentence in chat_stream_akari_poker.chat(
-            messages, model="gpt-3.5-turbo-0613"
+            messages, model="gpt-4-turbo-preview"
         ):
             text_to_voice.put_text(sentence)
             response += sentence
@@ -420,9 +422,7 @@ def main() -> None:
         time.sleep(1)
 
         # カード交換タイム
-        change = chat_stream_akari_poker.judge_card_change(
-            messages, model="claude-3-haiku-20240307"
-        )
+        change = chat_stream_akari_poker.judge_card_change(messages)
         if change:
             try:
                 stub.SetMotion(
@@ -482,7 +482,9 @@ def main() -> None:
         card_detector.start_judging()
         player_card_num = card_detector.get_card_result()
         if akari_card_num > player_card_num:
-            messages.append({"role": "user", "content": "あなたの勝ちです。"})
+            messages.append(
+                {"role": "user", "content": "勝負の結果あかりが勝ちました。"}
+            )
             m5.set_display_text(
                 text="あなたの負け",
                 pos_x=Positions.CENTER,
@@ -494,7 +496,9 @@ def main() -> None:
                 sync=False,
             )
         elif akari_card_num < player_card_num:
-            messages.append({"role": "user", "content": "あなたの負けです。"})
+            messages.append(
+                {"role": "user", "content": "勝負の結果あかりが負けました。"}
+            )
             m5.set_display_text(
                 text="あなたの勝ち",
                 pos_x=Positions.CENTER,
@@ -506,7 +510,7 @@ def main() -> None:
                 sync=False,
             )
         else:
-            messages.append({"role": "user", "content": "引き分けです。"})
+            messages.append({"role": "user", "content": "勝負の結果引き分けでした。"})
             m5.set_display_text(
                 text="引き分け",
                 pos_x=Positions.CENTER,
@@ -519,7 +523,7 @@ def main() -> None:
             )
         response = ""
         for sentence in chat_stream_akari_poker.chat(
-            messages, model="claude-3-haiku-20240307"
+            messages, model="gpt-3.5-turbo-0613"
         ):
             text_to_voice.put_text(sentence)
             response += sentence
