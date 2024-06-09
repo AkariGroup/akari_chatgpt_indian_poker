@@ -523,7 +523,7 @@ def main() -> None:
             )
         response = ""
         for sentence in chat_stream_akari_poker.chat(
-            messages, model="gpt-3.5-turbo-0613"
+            messages, model="gpt-3.5-turbo"
         ):
             text_to_voice.put_text(sentence)
             response += sentence
