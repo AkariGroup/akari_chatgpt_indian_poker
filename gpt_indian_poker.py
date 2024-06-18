@@ -42,7 +42,7 @@ class ChatStreamAkariPoker(ChatStreamAkari):
     def judge_card_change_gpt(
         self,
         messages: list,
-        model: str = "gpt-4-turbo-preview",
+        model: str = "gpt-4-turbo",
         temperature: float = 0.7,
     ) -> bool:
         result = openai.chat.completions.create(
@@ -107,7 +107,7 @@ class ChatStreamAkariPoker(ChatStreamAkari):
     def judge_card_change(
         self,
         messages: list,
-        model: str = "gpt-4-turbo-preview",
+        model: str = "gpt-4-turbo",
         temperature: float = 0.7,
     ) -> bool:
         res = False
@@ -218,16 +218,16 @@ def main() -> None:
     )
     parser.add_argument("--voicevox_local", action="store_true")
     parser.add_argument(
-        "--voicevox_host",
+        "--voice_host",
         type=str,
         default="127.0.0.1",
-        help="VoiceVox server host",
+        help="voice server host",
     )
     parser.add_argument(
-        "--voicevox_port",
+        "--voice_port",
         type=str,
         default="50021",
-        help="VoiceVox server port",
+        help="voice server port",
     )
     parser.add_argument(
         "-m",
@@ -269,8 +269,8 @@ def main() -> None:
     if args.voicevox_local:
         from akari_chatgpt_bot.lib.voicevox import TextToVoiceVox
 
-        host = args.voicevox_host
-        port = args.voicevox_port
+        host = args.voice_host
+        port = args.voice_port
         text_to_voice = TextToVoiceVox(host, port)
     else:
         from akari_chatgpt_bot.lib.conf import VOICEVOX_APIKEY
@@ -411,7 +411,7 @@ def main() -> None:
             print("akari_motion_server is not working.")
         response = ""
         for sentence in chat_stream_akari_poker.chat(
-            messages, model="gpt-4-turbo-preview"
+            messages, model="gpt-4-turbo"
         ):
             text_to_voice.put_text(sentence)
             response += sentence
