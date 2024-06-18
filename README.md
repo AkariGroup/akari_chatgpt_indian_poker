@@ -25,4 +25,4 @@ AKARIとインディアン・ポーカーで勝負できるアプリ
    起動方法は https://github.com/AkariGroup/akari_motion_server を参照。  
 
 4. gpt_indian_poker.pyを起動する。
-   `python3 gpt_indian_poker.py --voicevox_local --voicevox_host {VOICEVOXを起動しているPCのIPアドレス}`  
+   `python3 gpt_indian_poker.py --voicevox_local --voice_host {VOICEVOXを起動しているPCのIPアドレス}`  
